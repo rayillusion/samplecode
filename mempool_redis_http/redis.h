@@ -1,142 +1,168 @@
-#ifndef RAYLEE_SYSTEM_REDIS_H
-#define RAYLEE_SYSTEM_REDIS_H
+#ifndef EIDOS_SYSTEM_ASYNCREDIS_H
+#define EIDOS_SYSTEM_ASYNCREDIS_H
 
-
-#include <string_view>
-#include <queue>
-
-#include <boost/asio.hpp>
-#include <mutex>
-#include <future>
 #include <atomic>
-#include <thread>
-#include <boost/thread.hpp>
-// #include <boost/fiber/all.hpp>
-#include <boost/redis.hpp>
+#include <future>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <chrono>
+#include <vector>
+#include <unordered_map>
+#include <sw/redis++/redis++.h>
+#include "config.h"
+#include "../utils/singleton.h"
+#include "../logger/log.h"
 
-using namespace std::chrono_literals;
-
-#include "singleton.h"
-
-/* not use : use asyncredis.h/cpp
-
-
-namespace raylee
+namespace eidos::redis
 {
-  using boost::redis::connection;
-  using boost::redis::request;
-  using boost::redis::response;
-  using boost::redis::config;
-  namespace net = boost::asio;
-
-  class Redis : public Singleton<Redis>
+  class Redis
   {
-  public: 
-    Redis();
-    ~Redis() {}
+  public:
+    static void start();
+    static void end();
 
-    void set();
-    void start(int pool_count);
-    void stop();
+    static sw::redis::Redis * Get() { return Redis::_redis; }
 
-    // template<class ResultT, class... Ts>
-    // bool read(request& req, ResultT &out)
-    // {
-    //   response<TS...> resp;
+  private:
+    static sw::redis::Redis * _redis;
+  };
 
-    // }
+  class Executor
+  {
+  public:
+    virtual void run() = 0;
 
-    template <class Response>
-    bool read(request& req, Response& resp)
-    {
-      try
-      {
-        std::chrono::time_point<std::chrono::steady_clock> cur = std::chrono::steady_clock::now();
 
-        auto conn = std::make_shared<connection>(_io_context);
-      
-        conn->async_run(_config, {}, net::consign(net::detached, conn));
-
-        if(conn && conn->will_reconnect())
-        {
-          //std::cout << "[Redis] async_exec [" << time(nullptr) << "]\n"; 
-
-          std::promise<bool> promise;
-          auto fut = promise.get_future();
-
-          conn->async_exec(req, resp, [&](auto ec, auto) {
-            if(!ec) {
-              std::cout << "[Redis] Read Success exec\n";
-              promise.set_value(true);
-            } 
-            else{
-              std::cout << "[Redis] Read Fail exec : " << ec << " [" << time(nullptr) << "]\n";
-              promise.set_value(false);
-            }
-          });
-
-          if(std::future_status::ready == fut.wait_for(2s))
-          {
-            std::chrono::time_point<std::chrono::steady_clock> end_tp = std::chrono::steady_clock::now();
-            auto el_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_tp - cur);
-            std::cout << "  - 1 Elapse " << el_ms.count() << " ms\n";
-
-            std::cout << "[Redis] Read return [" << time(nullptr) << "]\n";
-
-            conn->cancel();
-            return fut.get();
-          }
-          else
-          {
-            std::chrono::time_point<std::chrono::steady_clock> end_tp = std::chrono::steady_clock::now();
-            auto el_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_tp - cur);
-            std::cout << "  - 2 Elapse " << el_ms.count() << " ms\n";
-
-            std::cout << "[Redis] time out [" << time(nullptr) << "]\n";
-            conn->cancel();
-            return false;
-          }
-          
-        }
-        else
-        {
-          std::cout << "[REDIS] Fail Connect\n";
-        }
-        conn->cancel();
-
-        std::chrono::time_point<std::chrono::steady_clock> end_tp = std::chrono::steady_clock::now();
-        auto el_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_tp - cur);
-        std::cout << "  - 3 Elapse " << el_ms.count() << " ms\n";
-        return false;
-      }
-      catch(const std::exception& e)
-      {
-        std::cout << e.what() << '\n';
-      }
-
-      return false;
+    void set_success(bool s = true) {
+        _success = s;
     }
-
-    // bool save(request& req);
-
-    void test();
+    bool is_success() { return _success; }
 
   private:
-    std::shared_ptr<connection> get_free_con();
-    void free_connection(std::shared_ptr<connection> conn);
-
-  private:
-    boost::asio::io_context _io_context{4};
-    config _config;
-    // std::queue<std::shared_ptr<connection>> _connection_q;
-    std::shared_ptr<connection> _conn{nullptr};
-    std::mutex _mutex;
-    bool _continue{true};
-    boost::thread_group _thread_group;
+    std::atomic<bool> _success {false};
 
   };
 
+
+  class Getter : public Executor
+  {
+  public:
+    Getter(const string& key)
+      : _key(key)
+    {
+    }
+
+    void run() override
+    {
+      try
+      {
+        auto str = Redis::Get()->get(_key);
+        if(str.has_value())
+        {
+          _result = str.value();
+          set_success();
+        }
+   
+      }
+      catch(const std::exception& e)
+      {
+        PLOGE << e.what();
+      }
+    }
+
+    string& get_result() { return _result; }
+  
+  private:
+    string _key;
+    string _result;
+  };
+
+  class Setter : public Executor
+  {
+  public:
+    Setter(const string& key, const string& value)
+      : _key(key)
+      , _value(value)
+    {
+    }
+
+    void run() override
+    {
+      try
+      {
+        if(Redis::Get()->set(_key, _value))
+          set_success();
+      }
+      catch(const std::exception& e)
+      {
+        PLOGE << e.what();
+      }
+    }
+  
+  private:
+    string _key;
+    string _value;
+  };
+
+
+  class HMGetter : public Executor
+  {
+  public:
+    HMGetter(const string& key, std::vector<std::string>& fields)
+      : _key(key)
+      , _fields(fields)
+    {}
+
+
+    void run() override
+    {
+      try
+      {
+        Redis::Get()->hmget(_key, _fields.begin(), _fields.end(), std::back_inserter(_res));
+        set_success();
+
+      }
+      catch(const std::exception& e)
+      {
+        PLOGE << e.what();
+      }
+    }
+
+    std::vector<std::optional<std::string>>& get_result() { return _res; }
+
+  private:
+    std::string _key;
+    std::vector<std::string> _fields;
+    std::vector<std::optional<std::string>> _res;
+  };
+
+  class HMSetter : public Executor
+  {
+  public:
+    HMSetter(const string& key, std::unordered_map<std::string, std::string>& kvs)
+      : _key_values(kvs), _key(key)
+    {
+    }
+
+    void run() override
+    {
+      try
+      {
+        Redis::Get()->hmset(_key, _key_values.begin(), _key_values.end());
+        set_success();
+      }
+      catch(const std::exception& e)
+      {
+        PLOGE << e.what();
+      }
+    }
+
+  private:
+    std::unordered_map<std::string, std::string> _key_values;
+    std::string _key;
+  };
+
 }
-*/
+
 #endif
