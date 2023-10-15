@@ -5,7 +5,7 @@
 #include "redis.h"
 
 
-namespace eidos::redis
+namespace raylee::redis
 {
   sw::redis::Redis * Redis::_redis = nullptr;
 
@@ -21,7 +21,7 @@ namespace eidos::redis
     connection_options.socket_timeout = std::chrono::seconds(20);
 
     sw::redis::ConnectionPoolOptions pool_options;
-    pool_options.size = EIDOS_REDIS_CONNECTION_COUNT;  // Pool size, i.e. max number of connections.
+    pool_options.size = RAYLEE_REDIS_CONNECTION_COUNT;  // Pool size, i.e. max number of connections.
 
     // Optional. Max time to wait for a connection. 0ms by default, which means wait forever.
     // Say, the pool size is 3, while 4 threds try to fetch the connection, one of them will be blocked.

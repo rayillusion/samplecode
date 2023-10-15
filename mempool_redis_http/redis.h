@@ -1,5 +1,5 @@
-#ifndef EIDOS_SYSTEM_ASYNCREDIS_H
-#define EIDOS_SYSTEM_ASYNCREDIS_H
+#ifndef RAYLEE_SYSTEM_ASYNCREDIS_H
+#define RAYLEE_SYSTEM_ASYNCREDIS_H
 
 #include <atomic>
 #include <future>
@@ -14,7 +14,7 @@
 #include "../utils/singleton.h"
 #include "../logger/log.h"
 
-namespace eidos::redis
+namespace raylee::redis
 {
   class Redis
   {
